@@ -47,11 +47,14 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Processor.cs" />
+    <Compile Include="ReceiveDataResult.cs" />
     <Compile Include="SSLHandshakeType.cs" />
     <Compile Include="SSLHeaderType.cs" />
     <Compile Include="SSLVersion.cs" />
+    <Compile Include="TestResult.cs" />
     <Compile Include="Utility.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="VulnerabilityStatus.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

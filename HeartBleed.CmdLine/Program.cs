@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Seq;
 
 namespace HeartBleed.CmdLine
 {
@@ -21,15 +22,17 @@ namespace HeartBleed.CmdLine
             Log.Logger = new LoggerConfiguration()
                     .WriteTo.Trace()
                     .WriteTo.ColoredConsole()
+                    .WriteTo.Seq("http://localhost:5341/")
                     .CreateLogger();
         }
 
         static void Main(string[] args)
         {
 #if DEBUG
-            string host = "10.0.1.2";
-            int port = 5001;
 #else
+            string host = "";
+            int port = 443;
+
             if (args.Length == 0)
             {
                 Usage();
@@ -46,8 +49,28 @@ namespace HeartBleed.CmdLine
             SetupLogger();
 
             Processor processor = new Processor();
-            Task<bool> task = Task.Run<bool>(() => processor.TestHost(host, port, SSLVersion.TLS1_2_VERSION));
-            task.Wait();
+
+            string file = @"c:\jobs\vuln.txt";
+            if (System.IO.File.Exists(file))
+            {
+                string[] readAllLines = System.IO.File.ReadAllLines(file);
+                int port = 443;
+
+                foreach (string host in readAllLines.OrderBy(p => p))
+                {
+                    Log.Information("Processing Host {Host}", host);
+
+                    Task<TestResult> task = Task.Run<TestResult>(() => processor.TestHost(host, port, SSLVersion.TLS1_2_VERSION));
+                    task.Wait();
+
+                    Log.Information("Task Completed in {ElapsedTime}, {Host}, {Port}, {Status} {@Result}", task.Result.ElapsedTime, task.Result.Host, task.Result.Port, task.Result.Status, task.Result);
+                    
+                    if (task.Result.Data != null)
+                        Log.Information("Data for {Host} {Data}", task.Result.Host, task.Result.Data.Select(p => (int)p));
+
+                    System.Threading.Thread.Sleep(3000);
+                }
+            }
 
             Console.ReadKey();
         }

