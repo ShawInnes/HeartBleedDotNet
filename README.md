@@ -1,5 +1,10 @@
-HeartBleedDotNet
-================
+HeartBleed DotNet
+=================
+
+Drawing on the great work of others, and the disturbingly simple PoC attack, I wanted to write a .NET implementation so that I could run the PoC against some embedded devices running IPv6 only, and in a windows environment where I couldn't (or couldn't be bothered) installing python or go.
+
+I hope this is of use to someone else.
+
 
     DotNet OpenSSL Heartbleed PoC at https://github.com/ShawInnes/HeartBleedDotNet
     by Shaw Innes (shaw@immortal.net.au)
