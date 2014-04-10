@@ -70,10 +70,18 @@ namespace HeartBleed.Net
             byte[] buffer = new byte[SSL3_RT_HEADER_LENGTH];
             length = SSL3_RT_HEADER_LENGTH;
 
-            int receive = socket.Receive(buffer, SSL3_RT_HEADER_LENGTH, SocketFlags.None);
-            if (receive != SSL3_RT_HEADER_LENGTH)
+            try
             {
-                Log.Error("Invalid HEADER size");
+                int receive = socket.Receive(buffer, SSL3_RT_HEADER_LENGTH, SocketFlags.None);
+                if (receive != SSL3_RT_HEADER_LENGTH)
+                {
+                    Log.Error("Invalid HEADER size");
+                    return false;
+                }
+            }
+            catch (System.Net.Sockets.SocketException)
+            {
+                Log.Error("Socket Exception");
                 return false;
             }
 
@@ -125,7 +133,9 @@ namespace HeartBleed.Net
                 Log.Information("Sending Client Hello...");
                 byte[] hello = GetHello(requestedVersion);
                 if (socket.Send(hello) != hello.Length)
-                    throw new InvalidOperationException("Error while sending HELLO");
+                {
+                    Log.Error("Error while sending HELLO");
+                }
 
                 byte[] buffer = null;
                 byte type = 0;
@@ -137,12 +147,18 @@ namespace HeartBleed.Net
                 while (!done)
                 {
                     if (!ReceiveHeader(socket, ref type, ref version, ref length))
-                        throw new InvalidOperationException("Error while receiving header");
+                    {
+                        Log.Error("Error while receiving header");
+                        return false;
+                    }
 
                     Log.Information("\tReceive Header {Type} {Version} {Length}", (SSLHeaderType)type, (SSLVersion)version, length);
 
                     if (!ReceiveData(socket, ref length, ref buffer))
-                        throw new InvalidOperationException("Error while receiving data");
+                    {
+                        Log.Error("Error while receiving data");
+                        return false;
+                    }
 
                     if ((SSLHeaderType)type == SSLHeaderType.SSL3_RT_HANDSHAKE)
                     {
@@ -167,20 +183,33 @@ namespace HeartBleed.Net
                     }
                 }
 
-                Log.Information("Sending heartbeat request...");
                 byte[] heartbeat = GetHeartBeat(requestedVersion);
+
+                Log.Information("Sending heartbeat request...");
                 if (socket.Send(heartbeat) != heartbeat.Length)
-                    throw new InvalidOperationException("Error while sending HEARTBEAT");
+                {
+                    Log.Error("Error while sending HEARTBEAT");
+                    return false;
+                }
 
                 Log.Information("Waiting for heartbeat response...");
                 if (!ReceiveHeader(socket, ref type, ref version, ref length))
-                    throw new InvalidOperationException("Error while receiving header");
+                {
+                    Log.Error("Error while heartbeat response header");
+                    return false;
+                }
 
                 if (type != (byte)SSLHeaderType.SSL3_RT_HEARTBEAT)
-                    throw new InvalidOperationException("Invalid HEARTBEAT response");
+                {
+                    Log.Error("Invalid HEARTBEAT response");
+                    return false;
+                }
 
                 if (!ReceiveData(socket, ref length, ref buffer))
-                    throw new InvalidOperationException("Error while receiving data");
+                {
+                    Log.Error("Error while receiving data");
+                    return false;
+                }
 
                 socket.Close();
 

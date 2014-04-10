@@ -35,7 +35,7 @@ namespace HeartBleed.CmdLine
             string host = args[0];
             int port = 443;
 
-            if (!int.TryParse(args[1], out port))
+            if (args.Length > 1 && !int.TryParse(args[1], out port))
                 port = 443;
 
             SetupLogger();
