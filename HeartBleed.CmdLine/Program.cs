@@ -26,6 +26,10 @@ namespace HeartBleed.CmdLine
 
         static void Main(string[] args)
         {
+#if DEBUG
+            string host = "10.0.1.2";
+            int port = 5001;
+#else
             if (args.Length == 0)
             {
                 Usage();
@@ -37,11 +41,13 @@ namespace HeartBleed.CmdLine
 
             if (args.Length > 1 && !int.TryParse(args[1], out port))
                 port = 443;
+#endif
 
             SetupLogger();
 
             Processor processor = new Processor();
-            processor.TestHost(host, port);
+            Task<bool> task = Task.Run<bool>(() => processor.TestHost(host, port, SSLVersion.TLS1_2_VERSION));
+            task.Wait();
 
             Console.ReadKey();
         }
