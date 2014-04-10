@@ -93,9 +93,9 @@ namespace HeartBleed.Net
                         result.Success = false;
                     }
                 }
-                catch (System.Net.Sockets.SocketException)
+                catch (System.Net.Sockets.SocketException ex)
                 {
-                    Log.Error("Socket Exception");
+                    Log.Error("Socket Exception {Message}", ex.Message);
                     result.Success = false;
                 }
             });
@@ -127,18 +127,20 @@ namespace HeartBleed.Net
                     {
                         receive = socket.Receive(buffer, offset, remaining, SocketFlags.None);
                     }
-                    catch (System.Net.Sockets.SocketException)
+                    catch (System.Net.Sockets.SocketException ex)
                     {
-                        Log.Error("Socket Exception");
+                        Log.Error("Socket Exception {Message}", ex.Message);
                         success = false;
                     }
 
                     offset += receive;
                     remaining -= receive;
 
+                    System.Threading.Thread.Sleep(100);
+
                     if (readCount++ == 5)
                     {
-                        Log.Information("Too many consecutive reads");
+                        Log.Information("Too many consecutive reads ({0})", readCount);
                         success = false;
                     }
                 }
@@ -167,7 +169,16 @@ namespace HeartBleed.Net
                     Log.Information("Trying " + sslVersion + "...");
                     Log.Information("Connecting...");
 
-                    socket.Connect(host, port);
+                    try
+                    {
+                        socket.Connect(host, port);
+                    }
+                    catch (System.Net.Sockets.SocketException)
+                    {
+                        Log.Error("Error on socket connect");
+                        result.Status = VulnerabilityStatus.Failed;
+                        return result;
+                    }
 
                     Log.Information("Sending Client Hello...");
                     await Task.Run(() =>

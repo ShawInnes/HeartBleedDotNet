@@ -52,7 +52,7 @@ namespace HeartBleed.CmdLine
             //    {
             Log.Information("Processing Host {Host}", host);
 
-            Task<TestResult> task = Task.Run<TestResult>(() => processor.TestHost(host, port, SSLVersion.TLS1_2_VERSION));
+            Task<TestResult> task = Task.Run<TestResult>(() => processor.TestHost(host, port, SSLVersion.SSL3_0_VERSION));
             task.Wait();
 
             Log.Information("Task Completed in {ElapsedTime}, {Host}, {Port}, {Status} {@Result}", task.Result.ElapsedTime, task.Result.Host, task.Result.Port, task.Result.Status, task.Result);
@@ -63,8 +63,6 @@ namespace HeartBleed.CmdLine
             System.Threading.Thread.Sleep(3000);
             //    }
             //}
-
-            Console.ReadKey();
         }
     }
 }
