@@ -1,4 +1,5 @@
 ﻿using HeartBleed.Net;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -15,6 +16,14 @@ namespace HeartBleed.CmdLine
             Console.WriteLine();
         }
 
+        private static void SetupLogger()
+        {
+            Log.Logger = new LoggerConfiguration()
+                    .WriteTo.Trace()
+                    .WriteTo.ColoredConsole()
+                    .CreateLogger();
+        }
+
         static void Main(string[] args)
         {
             if (args.Length == 0)
@@ -28,6 +37,8 @@ namespace HeartBleed.CmdLine
 
             if (!int.TryParse(args[1], out port))
                 port = 443;
+
+            SetupLogger();
 
             Processor processor = new Processor();
             processor.TestHost(host, port);

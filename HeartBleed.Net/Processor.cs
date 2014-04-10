@@ -21,17 +21,6 @@ namespace HeartBleed.Net
 {
     public class Processor
     {
-        /// <summary>
-        /// Initializes a new instance of the Processor class.
-        /// </summary>
-        public Processor()
-        {
-            Log.Logger = new LoggerConfiguration()
-                                .WriteTo.Trace()
-                                .WriteTo.ColoredConsole()
-                                .CreateLogger();
-        }
-
         public static byte[] GetHello(SSLVersion version)
         {
             byte[] data = {
