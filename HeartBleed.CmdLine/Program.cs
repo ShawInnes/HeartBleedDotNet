@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using Seq;
 
 namespace HeartBleed.CmdLine
 {
@@ -22,17 +21,11 @@ namespace HeartBleed.CmdLine
             Log.Logger = new LoggerConfiguration()
                     .WriteTo.Trace()
                     .WriteTo.ColoredConsole()
-                    .WriteTo.Seq("http://localhost:5341/")
                     .CreateLogger();
         }
 
         static void Main(string[] args)
         {
-#if DEBUG
-#else
-            string host = "";
-            int port = 443;
-
             if (args.Length == 0)
             {
                 Usage();
@@ -44,33 +37,32 @@ namespace HeartBleed.CmdLine
 
             if (args.Length > 1 && !int.TryParse(args[1], out port))
                 port = 443;
-#endif
 
             SetupLogger();
 
             Processor processor = new Processor();
 
-            string file = @"c:\jobs\vuln.txt";
-            if (System.IO.File.Exists(file))
-            {
-                string[] readAllLines = System.IO.File.ReadAllLines(file);
-                int port = 443;
+            //string file = @"c:\jobs\vuln.txt";
+            //if (System.IO.File.Exists(file))
+            //{
+            //    string[] readAllLines = System.IO.File.ReadAllLines(file);
+            //    int port = 443;
 
-                foreach (string host in readAllLines.OrderBy(p => p))
-                {
-                    Log.Information("Processing Host {Host}", host);
+            //    foreach (string host in readAllLines.OrderBy(p => p))
+            //    {
+            Log.Information("Processing Host {Host}", host);
 
-                    Task<TestResult> task = Task.Run<TestResult>(() => processor.TestHost(host, port, SSLVersion.TLS1_2_VERSION));
-                    task.Wait();
+            Task<TestResult> task = Task.Run<TestResult>(() => processor.TestHost(host, port, SSLVersion.TLS1_2_VERSION));
+            task.Wait();
 
-                    Log.Information("Task Completed in {ElapsedTime}, {Host}, {Port}, {Status} {@Result}", task.Result.ElapsedTime, task.Result.Host, task.Result.Port, task.Result.Status, task.Result);
-                    
-                    if (task.Result.Data != null)
-                        Log.Information("Data for {Host} {Data}", task.Result.Host, task.Result.Data.Select(p => (int)p));
+            Log.Information("Task Completed in {ElapsedTime}, {Host}, {Port}, {Status} {@Result}", task.Result.ElapsedTime, task.Result.Host, task.Result.Port, task.Result.Status, task.Result);
 
-                    System.Threading.Thread.Sleep(3000);
-                }
-            }
+            if (task.Result.Data != null)
+                Log.Information("Data for {Host} {Data}", task.Result.Host, task.Result.Data.Select(p => (int)p));
+
+            System.Threading.Thread.Sleep(3000);
+            //    }
+            //}
 
             Console.ReadKey();
         }
