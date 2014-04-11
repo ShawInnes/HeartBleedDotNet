@@ -3,6 +3,7 @@ using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -12,7 +13,10 @@ namespace HeartBleed.CmdLine
     {
         private static void Usage()
         {
-            Console.WriteLine("Usage: <Command> <Hostname> [Port]");
+            string file = Assembly.GetExecutingAssembly().Location;
+            string app = System.IO.Path.GetFileName(file);
+
+            Console.WriteLine("Usage: {0} <Hostname> [Port]", app);
             Console.WriteLine();
         }
 
@@ -26,6 +30,7 @@ namespace HeartBleed.CmdLine
 
         static void Main(string[] args)
         {
+
             if (args.Length == 0)
             {
                 Usage();
