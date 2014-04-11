@@ -8,7 +8,7 @@
     <OutputType>Exe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>HeartBleed.CmdLine</RootNamespace>
-    <AssemblyName>HeartBleed.CmdLine</AssemblyName>
+    <AssemblyName>HeartBleed</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <TargetFrameworkProfile />
