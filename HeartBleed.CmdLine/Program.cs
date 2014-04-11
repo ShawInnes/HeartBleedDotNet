@@ -15,9 +15,12 @@ namespace HeartBleed.CmdLine
         {
             string file = Assembly.GetExecutingAssembly().Location;
             string app = System.IO.Path.GetFileName(file);
-
+            
+            ConsoleColor fg = Console.ForegroundColor;
+            Console.ForegroundColor = ConsoleColor.Red;
             Console.WriteLine("Usage: {0} <Hostname> [Port]", app);
             Console.WriteLine();
+            Console.ForegroundColor = fg;
         }
 
         private static void SetupLogger()
